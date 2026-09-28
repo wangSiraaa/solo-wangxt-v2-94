@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: equity-admin
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:embedded}
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/equity}
+    username: ${SPRING_DATASOURCE_USERNAME:equity}
+    password: ${SPRING_DATASOURCE_PASSWORD:equity}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: ${SERVER_PORT:8080}
+
+logging:
+  level:
+    org.flywaydb: info

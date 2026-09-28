@@ -1,0 +1,245 @@
+<div class="container">
+  <h1>股权归属核对台</h1>
+  <p class="subtitle">按查询日核对每笔授予的未归属 / 已归属 / 已行权 / 待确认 / 可行权数量</p>
+  <div class="disclaimer">
+    本系统使用虚构归属计划与虚构条件，仅用于数量核对演示，不构成任何税务、法律或投资建议。
+  </div>
+
+  <!-- 授予选择 + 查询日期 -->
+  <div class="card">
+    <div class="row">
+      <div style="flex:1">
+        <label>授予</label>
+        <select [ngModel]="selectedGrantId" (ngModelChange)="selectGrant($event)">
+          @for (g of grants(); track g.id) {
+            <option [value]="g.id">{{ g.name }} · {{ g.grantee }} · {{ g.totalShares }} 股</option>
+          }
+          @if (grants().length === 0) {
+            <option [ngValue]="null">（暂无授予，请先在下方登记）</option>
+          }
+        </select>
+      </div>
+      <div style="flex:0 0 200px">
+        <label>查询日期</label>
+        <input type="date" [ngModel]="asOfDate" (ngModelChange)="asOfDate = $event" />
+      </div>
+      <div style="align-self:flex-end">
+        <button (click)="loadSnapshot()" [disabled]="loading()">核对</button>
+      </div>
+    </div>
+    @if (error()) {
+      <div class="error">{{ error() }}</div>
+    }
+  </div>
+
+  @if (snapshot(); as s) {
+    <!-- 五阶段数量 -->
+    <div class="card">
+      <h2>{{ s.grant.name }} 截至 {{ s.asOfDate }} 的数量构成</h2>
+      <div class="qty-grid">
+        <div class="qty unvested">
+          <div class="name">未归属</div>
+          <div class="value">{{ s.quantities.unvested }}</div>
+        </div>
+        <div class="qty vested">
+          <div class="name">已归属</div>
+          <div class="value">{{ s.quantities.vested }}</div>
+        </div>
+        <div class="qty exercised">
+          <div class="name">已行权</div>
+          <div class="value">{{ s.quantities.exercised }}</div>
+        </div>
+        <div class="qty pending">
+          <div class="name">待确认占用</div>
+          <div class="value">{{ s.quantities.pending }}</div>
+        </div>
+        <div class="qty exercisable">
+          <div class="name">可行权</div>
+          <div class="value">{{ s.quantities.exercisable }}</div>
+        </div>
+      </div>
+      <div class="formula">
+        校验：未归属 {{ s.quantities.unvested }} ＋ 已归属 {{ s.quantities.vested }}
+        ＝ 总数 {{ s.quantities.total }}　｜　已行权 {{ s.quantities.exercised }}
+        ＋ 待确认 {{ s.quantities.pending }} ＋ 可行权 {{ s.quantities.exercisable }}
+        ＝ 已归属 {{ s.quantities.vested }}
+      </div>
+    </div>
+
+    <!-- 操作区 -->
+    <div class="card">
+      <h2>额度操作（时间点可指定，便于回看各阶段）</h2>
+      <div class="inline-form">
+        <div>
+          <label>行权数量</label>
+          <input type="number" min="1" [ngModel]="exerciseQty"
+                 (ngModelChange)="exerciseQty = toInt($event)" />
+        </div>
+        <div>
+          <label>申请日</label>
+          <input type="date" [ngModel]="exerciseDate"
+                 (ngModelChange)="exerciseDate = $event" />
+        </div>
+        <div style="flex:0 0 auto;align-self:flex-end">
+          <button (click)="requestExercise()">发起行权申请</button>
+        </div>
+        <div>
+          <label>确认 / 取消生效日</label>
+          <input type="date" [ngModel]="actionDate"
+                 (ngModelChange)="actionDate = $event" />
+        </div>
+      </div>
+      <div class="inline-form" style="margin-top:10px">
+        <div>
+          <label>条件批次满足日（在下表条件节点上使用）</label>
+          <input type="date" [ngModel]="satisfyDate"
+                 (ngModelChange)="satisfyDate = $event" />
+        </div>
+      </div>
+      @if (actionError()) {
+        <div class="error">{{ actionError() }}</div>
+      }
+    </div>
+
+    <!-- 行权申请 -->
+    <div class="card">
+      <h2>行权申请记录（按查询日回看状态）</h2>
+      @if (s.requests.length === 0) {
+        <p class="muted">暂无申请。</p>
+      } @else {
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>数量</th><th>申请日</th><th>确认日</th><th>取消日</th>
+              <th>查询日状态</th><th>查询日是否占用</th><th class="right">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (r of s.requests; track r.id) {
+              <tr>
+                <td>{{ r.id }}</td>
+                <td>{{ r.quantity }}</td>
+                <td>{{ r.requestedDate }}</td>
+                <td>{{ r.confirmedDate || '—' }}</td>
+                <td>{{ r.cancelledDate || '—' }}</td>
+                <td>
+                  @switch (r.status) {
+                    @case ('PENDING') { <span class="tag pending">待确认</span> }
+                    @case ('CONFIRMED') { <span class="tag confirmed">已确认</span> }
+                    @case ('CANCELLED') { <span class="tag cancelled">已取消</span> }
+                  }
+                </td>
+                <td>{{ r.occupiesAsOf ? '占用中' : '否' }}</td>
+                <td class="right">
+                  <button class="ghost" (click)="confirm(r.id)"
+                          [disabled]="r.status !== 'PENDING'">确认</button>
+                  <button class="ghost danger" style="background:#fee2e2"
+                          (click)="cancel(r.id)"
+                          [disabled]="r.status !== 'PENDING'">取消</button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      }
+    </div>
+
+    <!-- 归属时间轴 -->
+    <div class="card">
+      <h2>归属时间轴（月度节点）</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>月序</th><th>归属日</th><th>本节点股数</th>
+            <th>条件</th><th>实际计入日</th><th>查询日是否已归属</th>
+            <th class="right">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (n of s.nodes; track n.monthIndex) {
+            <tr>
+              <td>{{ n.monthIndex }}</td>
+              <td>{{ n.nodeDate }}</td>
+              <td>{{ n.shares }}</td>
+              <td>
+                @if (n.conditional) {
+                  <span class="tag conditional">条件：{{ n.conditionLabel }}</span>
+                  @if (n.conditionMet) { <span class="tag vested">已满足</span> }
+                } @else {
+                  <span class="muted">自动归属</span>
+                }
+              </td>
+              <td>{{ n.vestedDate || '—' }}</td>
+              <td>
+                @if (n.vestedAsOf) {
+                  <span class="tag vested">已归属</span>
+                } @else if (n.nodeDate > s.asOfDate) {
+                  <span class="tag future">未到期</span>
+                } @else {
+                  <span class="tag future">条件未满足</span>
+                }
+              </td>
+              <td class="right">
+                @if (n.conditional && !n.conditionMet) {
+                  <button class="ghost" (click)="satisfy(n.monthIndex)">标记满足</button>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+
+  <!-- 登记新授予 -->
+  <div class="card">
+    <h2>登记新授予</h2>
+    <div class="form-grid">
+      <div>
+        <label>授予名称</label>
+        <input [(ngModel)]="form.name" placeholder="ESOP-2026-001" />
+      </div>
+      <div>
+        <label>受让人</label>
+        <input [(ngModel)]="form.grantee" placeholder="张三" />
+      </div>
+      <div>
+        <label>授予日期（月底授予会自动落在各月最后一天）</label>
+        <input type="date" [(ngModel)]="form.grantDate" />
+      </div>
+      <div>
+        <label>授予数量（整数股）</label>
+        <input type="number" min="1" [(ngModel)]="form.totalShares" />
+      </div>
+      <div>
+        <label>悬崖月数</label>
+        <input type="number" min="0" [(ngModel)]="form.cliffMonths" />
+      </div>
+      <div>
+        <label>归属总月数</label>
+        <input type="number" min="1" [(ngModel)]="form.vestingMonths" />
+      </div>
+      <div class="wide">
+        <label>条件批次（仅人工标记满足后才归属）</label>
+        @for (c of form.conditionalNodes; track c; let i = $index) {
+          <div class="row" style="margin-bottom:6px">
+            <div style="flex:0 0 110px">
+              <input type="number" min="1" [(ngModel)]="c.monthIndex" placeholder="月序" />
+            </div>
+            <div style="flex:1">
+              <input [(ngModel)]="c.conditionLabel" placeholder="条件说明（虚构）" />
+            </div>
+            <button class="danger" type="button" (click)="removeConditionalRow(i)">删除</button>
+          </div>
+        }
+        <button class="secondary" type="button" (click)="addConditionalRow()">添加条件批次</button>
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button type="button" (click)="register()">登记并展开节点</button>
+      @if (actionError()) {
+        <span class="error" style="margin-top:0">{{ actionError() }}</span>
+      }
+    </div>
+  </div>
+</div>
