@@ -1,0 +1,190 @@
+<div class="container">
+  <h1>股权授予核对台 <span class="muted">· Fictional Equity Administrator</span></h1>
+  <div class="sub">按查询日期重建授予的每一个阶段（未归属 / 已归属 / 已行权 / 待确认预留 / 可行权）。
+    全部规则为虚构计划演示，不构成税务或投资建议。</div>
+
+  @if (error()) {
+    <div class="error">⚠ {{ error() }}</div>
+  }
+
+  <!-- Grant + query-date selection -->
+  <div class="panel">
+    <div class="flex">
+      <div>
+        <label for="grant">授予 Grant</label>
+        <select id="grant" [ngModel]="selectedGrantId()" (ngModelChange)="selectedGrantId.set($event); onSelectGrant()">
+          @for (g of grants(); track g.id) {
+            <option [value]="g.id">{{ g.grantName }} — {{ g.grantee }} ({{ fmt(g.totalQuantity) }}, {{ g.planName }})</option>
+          }
+        </select>
+      </div>
+      <div>
+        <label for="asof">查询日期 As of</label>
+        <input id="asof" type="date" [ngModel]="asOf()" (ngModelChange)="asOf.set($event); refresh()">
+      </div>
+      <div class="right" style="flex:0 0 auto; align-self:flex-end;">
+        <button class="secondary" (click)="showCreate.set(!showCreate())">
+          {{ showCreate() ? '收起' : '＋ 登记新授予' }}
+        </button>
+      </div>
+    </div>
+
+    @if (showCreate()) {
+      <div class="panel" style="margin-top:14px; background:var(--panel2);">
+        <h2 style="margin-top:0">登记授予 / 悬崖期 / 归属计划</h2>
+        <div class="grid cols-4">
+          <div><label>授予编号</label><input [(ngModel)]="form.grantName"></div>
+          <div><label>受让人</label><input [(ngModel)]="form.grantee"></div>
+          <div><label>授予日（可填月底）</label><input type="date" [(ngModel)]="form.grantDate"></div>
+          <div><label>总数量（精确到 4 位）</label><input type="number" step="0.0001" [(ngModel)]="form.totalQuantity"></div>
+          <div><label>悬崖月数 cliff</label><input type="number" min="0" [(ngModel)]="form.cliffMonths"></div>
+          <div><label>归属总月数</label><input type="number" min="1" [(ngModel)]="form.vestingMonths"></div>
+          <div><label>虚构计划名</label><input [(ngModel)]="form.planName"></div>
+          <div><label>需条件批次的月份（逗号分隔）</label><input [(ngModel)]="conditionalMonthsText" placeholder="例如 24"></div>
+        </div>
+        <p class="muted" style="font-size:12px; margin:10px 0;">
+          悬崖节点一次性归属前 N 个月的份额；其后每月一个节点；最后一个节点吸收舍入余数，节点合计与授予总量精确相等。
+        </p>
+        <button style="width:auto; padding:8px 22px;" (click)="createGrant()">生成月度归属节点</button>
+      </div>
+    }
+  </div>
+
+  @if (timeline(); as t) {
+    <!-- Stage quantities -->
+    <div class="grid cols-4">
+      <div class="stat"><div class="k">未归属 Unvested</div><div class="v unvested">{{ fmt(t.balance.unvested) }}</div></div>
+      <div class="stat"><div class="k">已归属 Vested（累计）</div><div class="v vested">{{ fmt(t.balance.vested) }}</div></div>
+      <div class="stat"><div class="k">已行权 Exercised</div><div class="v exercised">{{ fmt(t.balance.exercised) }}</div></div>
+      <div class="stat"><div class="k">待确认预留 Pending</div><div class="v reserved">{{ fmt(t.balance.pendingReserved) }}</div></div>
+    </div>
+    <div class="panel" style="margin-top:12px;">
+      <div class="flex" style="align-items:center;">
+        <div style="flex:2;">
+          <div class="bar">
+            <span class="exercised" [style.width.%]="bar().exercised"></span>
+            <span class="reserved" [style.width.%]="bar().reserved"></span>
+            <span class="exercisable" [style.width.%]="bar().exercisable"></span>
+            <span class="unvested" [style.width.%]="bar().unvested"></span>
+          </div>
+          <div class="legend">
+            <span><i style="background:var(--exercised)"></i>已行权</span>
+            <span><i style="background:var(--reserved)"></i>待确认预留</span>
+            <span><i style="background:var(--exercisable)"></i>可行权</span>
+            <span><i style="background:var(--unvested)"></i>未归属</span>
+          </div>
+        </div>
+        <div class="stat" style="flex:1;">
+          <div class="k">可行权 Exercisable（截至 {{ t.balance.queryDate }}）</div>
+          <div class="v exercisable">{{ fmt(t.balance.exercisable) }}</div>
+        </div>
+      </div>
+
+      <!-- 额度解释：不是单一余额，而是各阶段独立重建 -->
+      <div class="formula">
+        <div>总量 <b>{{ fmt(t.balance.total) }}</b>
+          = 未归属 <b>{{ fmt(t.balance.unvested) }}</b>
+          + 已归属 <b>{{ fmt(t.balance.vested) }}</b></div>
+        <div>已归属 <b>{{ fmt(t.balance.vested) }}</b>
+          = 已行权 <b>{{ fmt(t.balance.exercised) }}</b>
+          + 待确认预留 <b>{{ fmt(t.balance.pendingReserved) }}</b>
+          + 可行权 <b>{{ fmt(t.balance.exercisable) }}</b></div>
+        <div class="muted">新申请可提交数量上限 = 可行权 <b>{{ fmt(t.balance.exercisable) }}</b>；
+          取消未确认申请会把预留份额释放回可行权；历史日期按当日状态重建，不读取今天的余额。</div>
+      </div>
+    </div>
+
+    <!-- Timeline -->
+    <div class="panel">
+      <h2 style="margin-top:0">授予时间轴 Vesting Timeline
+        <span class="muted" style="font-weight:400">
+          — 授予 {{ t.grantDate }} · {{ t.cliffMonths }} 月悬崖 · {{ t.vestingMonths }} 月归属</span>
+      </h2>
+      <div class="timeline">
+        @for (n of t.nodes; track trackNode($index, n)) {
+          <div class="tl-item"
+               [class.vested]="n.vestedAsOf"
+               [class.cliff]="n.cliffNode"
+               [class.conditional]="n.conditional && !n.vestedAsOf">
+            <div class="date">
+              {{ n.vestDate }} · {{ fmt(n.scheduledQuantity) }} 股
+              @if (n.cliffNode) { <span class="pill cliff">悬崖 CLIFF ×{{ t.cliffMonths }}</span> }
+              @if (n.conditional) {
+                <span class="pill cond">
+                  {{ n.conditionMetAt ? '条件已于 ' + n.conditionMetAt + ' 满足' : '需人工标记条件' }}
+                </span>
+              }
+            </div>
+            <div class="desc">
+              @if (n.vestedAsOf) {
+                已于 {{ n.effectiveVestDate }} 归属（截至查询日计入已归属）
+              } @else {
+                截至查询日未归属
+                @if (n.conditional) {
+                  — 条件未满足，即使计划日期已过也不归属
+                  <button class="secondary" style="width:auto; padding:2px 10px; margin-left:8px;"
+                          (click)="markCondition(n.seqNo)">标记条件于 {{ asOf() }} 满足</button>
+                }
+              }
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+
+    <!-- Exercise requests -->
+    <div class="panel">
+      <h2 style="margin-top:0">行权记录 Exercise Requests</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>编号</th><th class="num">数量</th><th>申请日</th><th>状态</th>
+            <th>确认日</th><th>取消日</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (r of t.requests; track trackReq($index, r)) {
+            <tr>
+              <td>{{ r.requestNo }}</td>
+              <td class="num">{{ fmt(r.quantity) }}</td>
+              <td>{{ r.requestDate }}</td>
+              <td><span class="pill {{ r.status }}">{{ r.status }}</span></td>
+              <td>{{ r.confirmedDate || '—' }}</td>
+              <td>{{ r.cancelledDate || '—' }}</td>
+              <td>
+                @if (r.status === 'PENDING') {
+                  <div class="row-actions">
+                    <button (click)="confirm(r.id)">确认（{{ asOf() }}）</button>
+                    <button class="danger" (click)="cancel(r.id)">取消并释放额度</button>
+                  </div>
+                }
+              </td>
+            </tr>
+          }
+          @if (!t.requests.length) {
+            <tr><td colspan="7" class="muted">尚无行权申请</td></tr>
+          }
+        </tbody>
+      </table>
+
+      <h2>提交行权申请（不得超过可行权 {{ fmt(t.balance.exercisable) }}）</h2>
+      <div class="flex">
+        <div><label>申请编号</label><input [(ngModel)]="exRequestNo" placeholder="EX-003"></div>
+        <div><label>数量</label><input type="number" step="0.0001" min="0.0001"
+                                      [max]="t.balance.exercisable" [(ngModel)]="exQuantity"></div>
+        <div><label>申请日期</label><input type="date" [(ngModel)]="exDate"></div>
+        <div style="flex:0 0 auto; align-self:flex-end;">
+          <button (click)="submitExercise()"
+                  [disabled]="exQuantity === null || exQuantity > t.balance.exercisable">
+            提交（PENDING 即占用额度）
+          </button>
+        </div>
+      </div>
+    </div>
+  }
+
+  <div class="disclaimer">
+    所有归属、悬崖、条件批次与行权规则均为虚构演示，数量以 4 位小数股数在服务端用 BigDecimal 精确计算，
+    PostgreSQL 以 NUMERIC(18,4) 持久化。本系统不提供税务、法律或投资建议。
+  </div>
+</div>
